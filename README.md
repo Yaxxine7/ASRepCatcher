@@ -72,3 +72,5 @@ options:
   --disable-spoofing    Disables arp spoofing, the MitM position is attained by the attacker using their own method. False by default : the tool uses its own arp spoofing method
 ```
 
+## Demo 
+![Alt Text](https://raw.githubusercontent.com/Yaxxine7/ASrepCatcher/main/demo.gif)
