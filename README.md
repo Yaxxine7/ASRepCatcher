@@ -53,7 +53,7 @@ If you prefer to use your own spoofing method, you can disable ARP spoofing with
 
 
                             
-usage: ASrepCatcher.py [-h] [-outfile OUTFILE] [-format {hashcat,john}] [-t Client workstations] [-tf TF] [-gw GW] [-dc DC] [-iface IFACE] [--keep-spoofing] [--disable-spoofing]
+usage: ASrepCatcher.py [-h] [-outfile OUTFILE] [-format {hashcat,john}] [-debug] [-t Client workstations] [-tf TF] [-gw GW] [-dc DC] [-iface IFACE] [--keep-spoofing] [--disable-spoofing]
                        {relay,listen}
 
 Catches Kerberos AS-REP packets and outputs it to a crackable format
@@ -67,6 +67,7 @@ options:
   -outfile OUTFILE      Output filename to write hashes to crack.
   -format {hashcat,john}
                         Format to save the AS_REP hashes. Default is hashcat.
+  -debug                Increase verbosity
   -dc DC                Domain controller's IP.
   -iface IFACE          Interface to use. Uses default interface if not specified.
 
