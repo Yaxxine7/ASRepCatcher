@@ -27,7 +27,7 @@ This is a passive mode, there is no alteration of the packets in transit.
 ```bash
 ./ASrepCatcher.py listen
 ```
-<ins>Bonus</ins> : in listen mode, the tool catches usernames in TGS-REP responses in order to give the attacker more information about the domain.
+<br><ins>Bonus</ins> : The tool catches unseen usernames in TGS-REP responses in order to give the attacker more information about the domain.
 
 ## Features of ARP spoofing
 In both ways, the arp spoofing is <ins>never in full-duplex : only one way is targetted</ins>. The purpose of this is to reduce network load on the attacker host.
