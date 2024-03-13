@@ -170,7 +170,7 @@ def is_valid_ipwithmask(ip_with_mask):
 
 async def handle_client(reader, writer):
     client_address = writer.get_extra_info('peername')[0]
-    logging.info(f"[+] Connection from {client_address}")
+    logging.debug(f"[+] Connection from {client_address}")
 
     try:
         while True:
