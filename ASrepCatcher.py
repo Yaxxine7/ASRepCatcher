@@ -129,7 +129,7 @@ def relaymode_arp_spoof(spoofed_ip):
         send(ARP(op = 2, pdst = list(Targets), psrc = spoofed_ip), verbose = False)
         time.sleep(1)
         timer += 1
-        if timer == 5 :
+        if timer == 3 :
             update_uphosts()
             timer = 0
 
