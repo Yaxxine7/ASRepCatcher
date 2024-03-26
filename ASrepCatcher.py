@@ -9,6 +9,7 @@
 from scapy.all import *
 import asn1
 import os
+import subprocess
 import argparse
 import time
 import threading
@@ -103,6 +104,12 @@ def parse_dc_response(packet):
         logging.info(f'[+] Restored arp cache of {packet[IP].dst}')
 
 
+def running_in_container():
+    return os.popen('ps -p 1 -o comm=').read().lower() != 'systemd'
+
+def has_net_admin_cap():
+    return "cap_net_admin" in os.popen("/sbin/capsh --decode=$(cat /proc/self/status | grep CapBnd | awk '{print $2}')").read().strip().split('=')[1].split(',')
+
 
 def listen_mode():
     try :
@@ -117,8 +124,9 @@ def listen_mode():
             stop_arp_spoofing_flag.set()
             logging.info('[*] Restoring arp cache of the gateway, please hold...')
             restore_all_targets()
-        os.system("echo 0 > /proc/sys/net/ipv4/ip_forward")
-        logging.info('[*] Disabled IPV4 forwarding')
+        if ip_forward != '1' :
+            os.system("echo {ip_forward} > /proc/sys/net/ipv4/ip_forward")
+            logging.info('[*] Restored IPV4 forwarding value')
 
 
 
@@ -305,11 +313,6 @@ async def relay_to_dc(data, client_ip):
     return await relay_without_modification_to_dc(data)
 
 async def kerberos_server():
-    try :
-        os.system("iptables-save > /tmp/asrepcatcher_rules.v4")
-    except Exception as e :
-        logging.error(f'[!] Could not back up iptables : {e}')
-        sys.exit(1)
     os.system('''sudo iptables -F
                 sudo iptables -X
                 sudo iptables -t nat -F
@@ -343,9 +346,10 @@ def relay_mode() :
             restore_all_targets()
         os.system("iptables-restore < /tmp/asrepcatcher_rules.v4")
         logging.info("[*] Restored iptables")
-        os.system("echo 0 > /proc/sys/net/ipv4/ip_forward")
-        logging.info('[*] Disabled IPV4 forwarding')
-        os.system(f'sysctl -w net.ipv4.conf.{iface}.route_localnet=0 1>/dev/null')
+        os.system(f'sysctl -w net.ipv4.conf.{iface}.route_localnet={localnet} 1>/dev/null')
+        if ip_forward != '1' :
+            os.system("echo {ip_forward} > /proc/sys/net/ipv4/ip_forward")
+            logging.info('[*] Restored IPV4 forwarding value')
 
 
 
@@ -399,7 +403,32 @@ if __name__ == '__main__':
         sys.exit(1)
 
     display_banner()
+
+    with open('/proc/sys/net/ipv4/conf/default/route_localnet', 'r') as f:
+        default_localnet = f.read().strip()
+    if running_in_container() and os.system(f'sysctl -w net.ipv4.conf.default.route_localnet={default_localnet} 1>/dev/null 2>&1') != 0 :
+        logging.error('[!] Detected container without --privileged option !')
+        print('If you are running Exegol, you can create another privileged container : exegol start EXAMPLE full --privileged')
+        sys.exit(1)
+
+    if os.system(f'sysctl -w net.ipv4.conf.default.route_localnet={default_localnet} 1>/dev/null 2>&1') != 0 :
+        logging.error('[!] Could not modify system option !')
+        sys.exit(1)
+
+    
+
     parameters = parser.parse_args()
+
+    if parameters.mode == 'relay' :
+        try :
+            result = subprocess.run(["iptables-save"], shell=True, check=True, capture_output=True)
+        except Exception as e :
+            logging.error(f'[!] Could not back up iptables {e.stderr.decode()}')
+            if e.returncode == 127 : print('You need to install iptables package.')
+            sys.exit(1)
+        with open('/tmp/asrepcatcher_rules.v4', 'wb') as f :
+            f.write(result.stdout)
+
     if parameters.keep_spoofing == True and parameters.disable_spoofing == True :
         logging.error('[!] Cannot use --keep-spoofing and --disable-spoofing at the same time')
         sys.exit(1)
@@ -448,9 +477,13 @@ if __name__ == '__main__':
     UsernamesSeen = set()
     HashesCaptured = set()
     logging.info(f'[*] Interface : {iface}')
-    os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
-    logging.debug('[*] Enabled IPV4 forwarding')
-
+    with open('/proc/sys/net/ipv4/ip_forward', 'r') as f:
+        ip_forward = f.read().strip()
+    if ip_forward != '1' :
+        os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
+        logging.debug('[*] Enabled IPV4 forwarding')
+    with open(f'/proc/sys/net/ipv4/conf/{iface}/route_localnet', 'r') as f:
+        localnet = f.read().strip()
     if not disable_spoofing :
         if parameters.t is not None :
             if is_valid_ip_list(parameters.t.replace(' ','')) :
