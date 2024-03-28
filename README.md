@@ -63,7 +63,7 @@ python3 setup.py install
                             | |                                        
                             |_|                                     
 Author : Yassine OUKESSOU
-Version : 0.1.0
+Version : 0.2.0
                             
 usage: ASRepCatcher [-h] [-outfile OUTFILE] [-format {hashcat,john}] [-debug] [-t Client workstations] [-tf targets file] [-gw Gateway IP] [-dc DC IP] [-iface interface]
                     [--stop-spoofing] [--disable-spoofing]
