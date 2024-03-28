@@ -9,7 +9,6 @@ setup(name='ASRepCatcher',
       url='https://github.com/Yaxxine7/ASRepCatcher',
       packages=['ASRepCatcher'],
       install_requires=["scapy", "asn1", "termcolor", "netifaces"],
-      python_requires='>=3.7.*',
       entry_points = {
           'console_scripts': ['ASRepCatcher=ASRepCatcher.ASRepCatcher:main']
           }
