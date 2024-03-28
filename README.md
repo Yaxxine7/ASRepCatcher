@@ -78,6 +78,7 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   -outfile OUTFILE      Output filename to write hashes to crack.
+  -usersfile USERSFILE  Output file name to write discovered usernames.
   -format {hashcat,john}
                         Format to save the AS_REP hashes. Default is hashcat.
   -debug                Increase verbosity

