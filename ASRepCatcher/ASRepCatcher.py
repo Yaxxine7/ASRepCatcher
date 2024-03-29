@@ -386,6 +386,7 @@ def parse_dc_response(packet):
     print_asrep_hash(username,domain,etype,cipher)
     if mode == 'listen' and stop_spoofing and not disable_spoofing :
         Targets.remove(packet[IP].dst)
+        InitialTargets.remove(packet[IP].dst)
         restore(gw,packet[IP].dst)
         logging.info(f'[+] Restored arp cache of {packet[IP].dst}')
 
@@ -556,6 +557,7 @@ async def relay_asreq_to_dc(data, client_ip):
         handle_as_rep(krb_response)
         if stop_spoofing and not disable_spoofing :
             if client_ip in Targets : Targets.remove(client_ip)
+            if client_ip in InitialTargets : InitialTargets.remove(client_ip)
             restore(client_ip, gw)
             logging.info(f'[+] Restored arp cache of {client_ip}')
         return response

@@ -50,7 +50,7 @@ git clone https://github.com/Yaxxine7/ASRepCatcher
 cd ASRepCatcher
 python3 setup.py install
 ```
-
+Requires at least Python 3.7
 ## Usage
 
 ```
