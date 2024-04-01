@@ -6,6 +6,7 @@ During an Active Directory black box pentest, if multicast DNS protocols are dis
 
 ASRepCatcher uses ARP spoofing to catch AS-REP messages returned by the Domain Controller to the clients and prints out the hash to crack.
 
+**This technique does not rely on Kerberos pre-authentication being disabled. It works for all users on the VLAN.**
 
 ## Two modes
 
