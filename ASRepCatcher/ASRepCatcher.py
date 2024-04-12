@@ -34,15 +34,17 @@ def display_banner():
                             | |                                        
                             |_|                                     
 Author : Yassine OUKESSOU
-Version : 0.2.0
+Version : 0.3.0
                             """)
 
-def is_dc_up(dc, iface):
-    ans = sr1( IP(dst=dc)/TCP(dport=88,flags="S"), iface=iface, verbose=False, timeout=1)
-    if ans is not None and ans[TCP].flags == 'SA' :
+def is_dc_up(dc):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1)
+    result = sock.connect_ex((dc,88))
+    sock.close()
+    if result == 0:
         return True
-    else :
-        return False
+    return False
 
 def is_valid_ip_list(iplist):
     if not re.match(r'^(((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?),)*((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$', iplist) :
@@ -192,7 +194,7 @@ if parameters.gw is not None and ipaddress.ip_address(parameters.gw) not in ipad
     logging.error(f'[!] Gateway not in {iface} subnet. Quitting...')
     sys.exit(1)
 
-if parameters.dc is not None and not is_dc_up(dc, iface):
+if parameters.dc is not None and not is_dc_up(dc):
     logging.error('[!] DC did not respond to TCP/88 ping probe. Quitting...')
     sys.exit(1)
 
