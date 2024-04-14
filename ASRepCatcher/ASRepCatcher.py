@@ -88,6 +88,10 @@ def valid_ip(address):
     except:
         return False
 
+def has_net_admin_cap():
+    return "cap_net_admin" in os.popen("/sbin/capsh --decode=$(cat /proc/self/status | grep CapBnd | awk '{print $2}')").read().strip().split('=')[1].split(',')
+
+
 display_banner()
 
 parser = argparse.ArgumentParser(add_help = True, description = "Catches Kerberos AS-REP packets and outputs it to a crackable format", formatter_class=argparse.RawTextHelpFormatter)
@@ -114,17 +118,31 @@ if os.geteuid() != 0 :
     logging.error("Please run as root")
     sys.exit(1)
 
-with open('/proc/sys/net/ipv4/conf/default/route_localnet', 'r') as f:
-    default_localnet = f.read().strip()
-if running_in_container() and os.system(f'sysctl -w net.ipv4.conf.default.route_localnet={default_localnet} 1>/dev/null 2>&1') != 0 :
-    logging.error('[!] Detected container without --privileged option !')
-    print('If you are running Exegol, you can create another privileged container : exegol start EXAMPLE full --privileged')
-    sys.exit(1)
+if running_in_container() and not has_net_admin_cap() :
+    logging.error('[!] Detected container without NET_ADMIN capability !')
+    print('If you are running Exegol, you can create another privileged container : exegol start EXAMPLE full --cap NET_ADMIN')
+    with open('/etc/hostname') as f :
+        hostname = f.read().strip()
+    print('If you want to add the NET_ADMIN capability to this container, you can copy /tmp/add_net_cap.sh script and run it on your host.')
+    net_cap_script = '''#!/bin/bash
 
-if os.system(f'sysctl -w net.ipv4.conf.default.route_localnet={default_localnet} 1>/dev/null 2>&1') != 0 :
-    logging.error('[!] Could not modify system option !')
-    sys.exit(1)
+if [ "$EUID" -ne 0 ]
+  then echo "Please run as root"
+  exit
+fi
 
+container_name="'''+hostname+'''"
+hostconfig="$(docker inspect $container_name | grep HostsPath | awk -F '"' '{print $4}' | rev | cut -d/ -f 2- | rev)/hostconfig.json"
+grep -qE '"CapAdd":\[.*"NET_ADMIN".*\]' $hostconfig && echo "NET_ADMIN capabiliy already present for $container_name" && exit 0
+docker stop $container_name 1>/dev/null
+sleep 2
+(grep -q '"CapAdd":null' $hostconfig && sed -i 's/"CapAdd":null/"CapAdd":["NET_ADMIN"]/' $hostconfig) || sed -i 's!"CapAdd":\[!"CapAdd":\["NET_ADMIN",!' $hostconfig
+(systemctl restart docker || service docker restart) && docker start $container_name
+echo "CAP_NET capability added to $container_name !"
+'''
+    with open('/tmp/add_net_cap.sh', 'w') as f :
+        f.write(net_cap_script)
+    sys.exit(1)
 
 parameters = parser.parse_args()
 
@@ -133,11 +151,13 @@ if parameters.mode == 'relay' :
     try :
         result = subprocess.run(["iptables-save"], shell=True, check=True, capture_output=True)
     except Exception as e :
-        logging.error(f'[!] Could not back up iptables {e.stderr.decode()}')
+        logging.error(f'[!] Could not back up iptables : {e.stderr.decode()}')
         if e.returncode == 127 : print('You need to install iptables package.')
         sys.exit(1)
     with open('/tmp/asrepcatcher_rules.v4', 'wb') as f :
         f.write(result.stdout)
+
+
 
 
 if parameters.t is not None and parameters.tf is not None :
@@ -241,10 +261,10 @@ if os.path.isfile(outfile) :
 with open('/proc/sys/net/ipv4/ip_forward', 'r') as f:
     ip_forward = f.read().strip()
 if ip_forward != '1' :
-    os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
+    if os.system("echo 1 > /proc/sys/net/ipv4/ip_forward") != 0 :
+        logging.error('[!] Could not enable IP forwarding. Quitting.')
+        sys.exit(1)
     logging.debug('[*] Enabled IPV4 forwarding')
-with open(f'/proc/sys/net/ipv4/conf/{iface}/route_localnet', 'r') as f:
-    localnet = f.read().strip()
 
 
 
@@ -393,9 +413,6 @@ def parse_dc_response(packet):
         logging.info(f'[+] Restored arp cache of {packet[IP].dst}')
 
 
-
-def has_net_admin_cap():
-    return "cap_net_admin" in os.popen("/sbin/capsh --decode=$(cat /proc/self/status | grep CapBnd | awk '{print $2}')").read().strip().split('=')[1].split(',')
 
 
 def listen_mode():
@@ -590,8 +607,7 @@ async def kerberos_server():
                 sudo iptables -P OUTPUT ACCEPT
                 sudo iptables -P FORWARD ACCEPT''')
     logging.debug('[*] Saved current iptables\n\n')
-    os.system(f'iptables -t nat -A PREROUTING -i {iface} -p tcp --dport 88 -j DNAT --to 127.0.0.1:88')
-    os.system(f'sysctl -w net.ipv4.conf.{iface}.route_localnet=1 1>/dev/null')
+    os.system(f'iptables -t nat -A PREROUTING -i {iface} -p tcp --dport 88 -j REDIRECT --to-port 88')
     print('\n')
     
     server = await asyncio.start_server(handle_client, '0.0.0.0', 88)
@@ -613,7 +629,6 @@ def relay_mode() :
             restore_all_targets()
         os.system("iptables-restore < /tmp/asrepcatcher_rules.v4")
         logging.info("[*] Restored iptables")
-        os.system(f'sysctl -w net.ipv4.conf.{iface}.route_localnet={localnet} 1>/dev/null')
         if ip_forward != '1' :
             os.system("echo {ip_forward} > /proc/sys/net/ipv4/ip_forward")
             logging.info('[*] Restored IPV4 forwarding value')
