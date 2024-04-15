@@ -118,6 +118,9 @@ if os.geteuid() != 0 :
     logging.error("Please run as root")
     sys.exit(1)
 
+parameters = parser.parse_args()
+
+
 if running_in_container() and not has_net_admin_cap() :
     logging.error('[!] Detected container without NET_ADMIN capability !')
     print('If you are running Exegol, you can create another privileged container : exegol start EXAMPLE full --cap NET_ADMIN')
@@ -144,7 +147,6 @@ echo "CAP_NET capability added to $container_name !"
         f.write(net_cap_script)
     sys.exit(1)
 
-parameters = parser.parse_args()
 
 
 if parameters.mode == 'relay' :
