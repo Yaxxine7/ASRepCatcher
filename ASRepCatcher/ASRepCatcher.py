@@ -309,7 +309,10 @@ if not disable_spoofing :
     mac_addresses = get_mac_addresses(TargetsList + [gw])
 
     if gw not in mac_addresses :
-        logging.error('[-] Gateway did not respond to ARP. Quitting...')
+        if gw == dc :
+            logging.error('[-] DC did not respond to ARP. Quitting...')
+        else :
+            logging.error('[-] Gateway did not respond to ARP. Quitting...')
         sys.exit(1)
 
 
@@ -460,10 +463,10 @@ def update_uphosts():
     old_hosts = Targets - set(mac_addresses.keys())
     if len(old_hosts) > 0 : 
         logging.debug(f'[*] Net probe check, removing down hosts from targets : {list(old_hosts)}')
-    if not stop_spoofing : 
+        Targets.difference_update(old_hosts)
+    if len(new_hosts) > 0 :
+        logging.debug(f'[*] Net probe check, adding new hosts to targets : {list(new_hosts)}')
         Targets.update(new_hosts)
-        if len(new_hosts) > 0 : logging.debug(f'[*] Net probe check, adding new hosts to targets : {list(new_hosts)}')
-    Targets.difference_update(old_hosts)
     if len(new_hosts) > 0 or len(old_hosts) > 0 :
         logging.debug(f'[*] Net probe check, updated targets list : {list(Targets)}')
         if Targets == set() : logging.warning(f'[!] No more target is up. Continuing probing targets...')
