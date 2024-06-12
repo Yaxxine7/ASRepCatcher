@@ -34,7 +34,7 @@ def display_banner():
                             | |                                        
                             |_|                                     
 Author : Yassine OUKESSOU
-Version : 0.3.0
+Version : 0.4.0
                             """)
 
 def is_dc_up(dc):
