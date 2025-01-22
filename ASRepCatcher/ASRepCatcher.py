@@ -430,7 +430,7 @@ def parse_dc_response(packet):
 
 def listen_mode():
     try :
-        sniff(filter=f"src port 88", prn=parse_dc_response)
+        sniff(filter=f"src port 88", prn=parse_dc_response, iface=iface, store=False)
     except KeyboardInterrupt :
         pass
     except Exception as e :
