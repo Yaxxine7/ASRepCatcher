@@ -34,7 +34,7 @@ def display_banner():
                             | |                                        
                             |_|                                     
 Author : Yassine OUKESSOU
-Version : 0.4.0
+Version : 0.5.0
                             """)
 
 def is_dc_up(dc):
@@ -199,6 +199,7 @@ if stop_spoofing and disable_spoofing :
 
 if debug :
     logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
+    logging.getLogger('asyncio').setLevel(logging.INFO)
 else :
     logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
@@ -218,9 +219,9 @@ if parameters.gw is not None and not valid_ip(parameters.gw) :
 iface_ip = netifaces.ifaddresses(str(iface))[netifaces.AF_INET][0]['addr']
 netmask = netifaces.ifaddresses(str(iface))[netifaces.AF_INET][0]['netmask']
 hwsrc = netifaces.ifaddresses(str(iface))[netifaces.AF_PACKET][0]['addr']
-subnet = ipaddress.IPv4Network(f'{iface_ip}/{netmask}', strict=False)
+iface_subnet = ipaddress.IPv4Network(f'{iface_ip}/{netmask}', strict=False)
 
-if parameters.gw is not None and ipaddress.ip_address(parameters.gw) not in ipaddress.ip_network(subnet) :
+if parameters.gw is not None and ipaddress.ip_address(parameters.gw) not in ipaddress.ip_network(iface_subnet) :
     logging.error(f'[!] Gateway not in {iface} subnet. Quitting...')
     sys.exit(1)
 
@@ -229,7 +230,7 @@ if parameters.dc is not None and not is_dc_up(dc):
     sys.exit(1)
 
 
-if parameters.dc is not None and ipaddress.ip_address(dc) in ipaddress.ip_network(subnet) :
+if parameters.dc is not None and ipaddress.ip_address(dc) in ipaddress.ip_network(iface_subnet) :
     if parameters.gw is None :
         if mode == 'relay' :
             logging.info('[*] DC seems to be in the same VLAN, will spoof as DC\'s IP')
@@ -301,17 +302,30 @@ if not disable_spoofing :
             sys.exit(1)
         TargetsList = iplist.split(',')
     else :
-        TargetsList = [str(ip) for ip in subnet.hosts()]
+        TargetsList = [str(ip) for ip in iface_subnet.hosts()]
         TargetsList.remove(gw)
-        logging.info(f'[*] Targets not supplied, will use local subnet {subnet} minus the gateway')
+        logging.info(f'[*] Targets not supplied, will use local subnet {iface_subnet} minus the gateway')
 
     if gw in TargetsList and (parameters.t is not None or parameters.tf is not None) :
         logging.info('[*] Found gateway in targets list. Removing it')
         TargetsList.remove(gw)
 
-    my_ip = get_if_addr(conf.iface)
+    my_ip = get_if_addr(iface)
     if my_ip in TargetsList :
         TargetsList.remove(my_ip)
+    
+    ip_addresses_not_in_iface_subnet = []
+    if parameters.t is not None or parameters.tf is not None :
+        logging.debug('[*] Checking targets list...')
+        ip_addresses_not_in_iface_subnet = [ip for ip in set(TargetsList) if ipaddress.ip_address(ip) not in ipaddress.ip_network(iface_subnet)]
+    if len(ip_addresses_not_in_iface_subnet) > 0 :
+        logging.debug(f'[-] These IP addresses are not in {iface} subnet and will be removed from targets list : {ip_addresses_not_in_iface_subnet}')
+        logging.warning('[!] Some IP addresses were removed from the targets list. Run in debug mode for more details.')
+    if set(TargetsList) == set(ip_addresses_not_in_iface_subnet) : 
+        logging.error(f'[-] No target IP was in {iface} subnet. Quitting...')
+        sys.exit(1)
+
+
 
     logging.debug('[*] ARP ping : discovering targets')
     mac_addresses = get_mac_addresses(TargetsList + [gw])
@@ -325,8 +339,8 @@ if not disable_spoofing :
 
 
 
-    Targets = set(TargetsList)
-    InitialTargets = set(TargetsList)
+    Targets = set(TargetsList) - set(ip_addresses_not_in_iface_subnet)
+    InitialTargets = set(TargetsList) - set(ip_addresses_not_in_iface_subnet)
 
     if parameters.mode == 'listen':
         thread = threading.Thread(target=listenmode_arp_spoof)
