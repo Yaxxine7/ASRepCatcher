@@ -156,18 +156,6 @@ echo "CAP_NET capability added to $container_name !"
 
 
 
-if parameters.mode == 'relay' :
-    try :
-        result = subprocess.run(["iptables-save"], shell=True, check=True, capture_output=True)
-    except Exception as e :
-        logging.error(f'[!] Could not back up iptables : {e.stderr.decode()}')
-        if e.returncode == 127 : print('You need to install iptables package.')
-        sys.exit(1)
-    with open('/tmp/asrepcatcher_rules.v4', 'wb') as f :
-        f.write(result.stdout)
-
-
-
 
 if parameters.t is not None and parameters.tf is not None :
     logging.error('[!] Cannot use -t and -tf simultaneously')
@@ -198,10 +186,10 @@ if stop_spoofing and disable_spoofing :
     stop_spoofing = False
 
 if debug :
-    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG, force=True)
     logging.getLogger('asyncio').setLevel(logging.INFO)
 else :
-    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO, force=True)
 
 
 if parameters.mode == 'relay' and parameters.dc is None :
@@ -268,6 +256,16 @@ if os.path.isfile(outfile) :
         i += 1
     outfile += f'.{i}'
 
+try :
+    result = subprocess.run(["iptables-save"], shell=True, check=True, capture_output=True)
+except Exception as e :
+    logging.error(f'[!] Could not back up iptables : {e.stderr.decode()}')
+    if e.returncode == 127 : print('You need to install iptables package.')
+    sys.exit(1)
+with open('/tmp/asrepcatcher_rules.v4', 'wb') as f :
+    f.write(result.stdout)
+logging.debug('[*] Saved current iptables')
+
 
 with open('/proc/sys/net/ipv4/ip_forward', 'r') as f:
     ip_forward = f.read().strip()
@@ -276,6 +274,9 @@ if ip_forward != '1' :
         logging.error('[!] Could not enable IP forwarding. Quitting.')
         sys.exit(1)
     logging.debug('[*] Enabled IPV4 forwarding')
+
+if parameters.mode == 'listen':
+    os.system('''sudo iptables -P FORWARD ACCEPT''')
 
 
 
@@ -345,7 +346,7 @@ if not disable_spoofing :
     if parameters.mode == 'listen':
         thread = threading.Thread(target=listenmode_arp_spoof)
         thread.start()
-        if dc != gw : logging.info('[+] ARP poisoning the gateway')
+        if dc != gw : logging.info('[+] ARP poisoning the gateway\n')
     elif parameters.mode == 'relay' :
         Targets.intersection_update(set(mac_addresses.keys()))
         if Targets == set() :
@@ -455,6 +456,8 @@ def listen_mode():
             stop_arp_spoofing_flag.set()
             logging.info('[*] Restoring arp cache of the gateway, please hold...')
             restore_all_targets()
+        os.system("iptables-restore < /tmp/asrepcatcher_rules.v4")
+        logging.info("[*] Restored iptables")
         if ip_forward != '1' :
             os.system("echo {ip_forward} > /proc/sys/net/ipv4/ip_forward")
             logging.info('[*] Restored IPV4 forwarding value')
@@ -641,7 +644,6 @@ async def kerberos_server():
                 sudo iptables -P INPUT ACCEPT
                 sudo iptables -P OUTPUT ACCEPT
                 sudo iptables -P FORWARD ACCEPT''')
-    logging.debug('[*] Saved current iptables\n\n')
     os.system(f'iptables -t nat -A PREROUTING -i {iface} -p tcp --dport 88 -j REDIRECT --to-port 88')
     print('\n')
     
