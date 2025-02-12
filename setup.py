@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='ASRepCatcher',
-      version='0.5.0',
+      version='0.6.0',
       description='Make everyone in your VLAN ASREProastable',
       license='GPLv3',
       author='Yassine OUKESSOU',

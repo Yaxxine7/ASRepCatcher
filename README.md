@@ -64,7 +64,7 @@ Requires at least Python 3.7
                             | |                                        
                             |_|                                     
 Author : Yassine OUKESSOU
-Version : 0.5.0
+Version : 0.6.0
                             
 usage: ASRepCatcher [-h] [-outfile OUTFILE] [-format {hashcat,john}] [-debug] [-t Client workstations] [-tf targets file] [-gw Gateway IP] [-dc DC IP] [-iface interface]
                     [--stop-spoofing] [--disable-spoofing]
