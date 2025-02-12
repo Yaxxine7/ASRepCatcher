@@ -181,7 +181,7 @@ HashFormat = parameters.format
 iface = parameters.iface if parameters.iface is not None else conf.iface
 disable_spoofing = parameters.disable_spoofing
 stop_spoofing = parameters.stop_spoofing
-gw = parameters.gw if parameters.gw is not None else conf.route.route("0.0.0.0")[2]
+gw = parameters.gw if parameters.gw is not None else netifaces.gateways()['default'][netifaces.AF_INET][0]
 dc = parameters.dc
 debug = parameters.debug
 
