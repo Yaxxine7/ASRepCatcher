@@ -534,18 +534,24 @@ async def handle_client(reader, writer):
             dc_response = await relay_to_dc(data, client_ip)
             writer.write(dc_response)
             await writer.drain()
-
+    except ConnectionResetError :
+        pass # It happens when message is empty due to the behaviour shown line 552
     except Exception as e:
         logging.error(f'[!] Socket error: {e}')
 
     finally:
         writer.close()
+        await writer.wait_closed()
 
 async def relay_without_modification_to_dc(data):
     reader, writer = await asyncio.open_connection(dc,88)
     writer.write(data)
     await writer.drain()
-    response = await reader.read(2048)
+    try:
+        response = await asyncio.wait_for(reader.read(2048), timeout=2)
+    except asyncio.TimeoutError as e :  # DC just sent an ACK, and the tool is waiting for data, will need to do some testing
+        response = b""    
+    
     writer.close()
     await writer.wait_closed()
     return response
