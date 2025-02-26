@@ -474,7 +474,7 @@ def listen_mode():
 
 def restore(poisoned_device, spoofed_ip):
     packet = ARP(op = 2, pdst = poisoned_device, psrc = spoofed_ip, hwsrc = getmacbyip(spoofed_ip)) 
-    send(packet, iface=iface, verbose = False, count=1)
+    send(packet, verbose = False, count=1)
 
 def restore_listenmode(dic_mac_addresses):
     packets_list = []
