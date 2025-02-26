@@ -480,14 +480,14 @@ def restore_listenmode(dic_mac_addresses):
     packets_list = []
     gateway_mac = getmacbyip(gw)
     for ip_address in dic_mac_addresses :
-        packets_list.append(Ether(dst=gateway_mac) / ARP(op = 2, psrc = ip_address, hwsrc = dic_mac_addresses[ip_address]))
+        packets_list.append(Ether(src = hwsrc, dst=gateway_mac) / ARP(op = 2, psrc = ip_address, hwsrc = dic_mac_addresses[ip_address]))
     sendp(packets_list, iface=iface, verbose = False)
 
 def restore_relaymode(dic_mac_addresses):
     packets_list = []
     gateway_mac = getmacbyip(gw)
     for target in dic_mac_addresses :
-        packets_list.append(Ether(dst=dic_mac_addresses[target]) / ARP(op = 2, psrc = gw, hwsrc = gateway_mac))
+        packets_list.append(Ether(src = hwsrc, dst=dic_mac_addresses[target]) / ARP(op = 2, psrc = gw, hwsrc = gateway_mac))
     sendp(packets_list, iface=iface, verbose = False)
 
 
