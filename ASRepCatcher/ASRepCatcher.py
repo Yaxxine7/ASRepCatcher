@@ -61,14 +61,14 @@ def running_in_container():
 
 def get_mac_addresses(ip_list):
     mac_addresses = {}
-    ans,unans=srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip_list),timeout=1,verbose=False, iface=iface)
+    ans,unans=srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip_list),timeout=1,verbose=False, iface=iface, retry=1)
     for i in ans :
         mac_addresses[i[1].psrc] = i[1].hwsrc
     return(mac_addresses)
 
 def relaymode_arp_spoof(spoofed_ip):
     # mac_addresses = update_uphosts()
-    mac_addresses = mac_addresses = get_mac_addresses(TargetsList)
+    mac_addresses = get_mac_addresses(TargetsList)
     timer = 0
     while not stop_arp_spoofing_flag.is_set() :
         if Targets != set() :
